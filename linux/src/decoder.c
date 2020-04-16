@@ -52,10 +52,12 @@ struct jpg_dec_ctx_s {
 
  struct SwsContext *swc;
  tjhandle tj;
+ tjhandle tj_transform;
 };
 
 #define JPG_BACKBUF_MAX 10
 struct jpg_frame_s    jpg_frames[JPG_BACKBUF_MAX];
+struct jpg_frame_s    jpg_transform_buffer;
 struct jpg_dec_ctx_s  jpg_decoder;
 struct spx_decoder_s  spx_decoder;
 
@@ -174,6 +176,10 @@ int decoder_init(void) {
     jpg_decoder.m_webcam_uvSize  = jpg_decoder.m_webcam_ySize / 4;
     decoder_set_video_delay(0);
 
+    jpg_decoder.tj_transform = NULL;
+    jpg_transform_buffer.data = NULL;
+    // TODO free that some time later..
+    jpg_transform_buffer.length = 0;
 #if 0
     speex_bits_init(&spx_decoder.bits);
     spx_decoder.state = speex_decoder_init(speex_lib_get_mode(SPEEX_MODEID_WB));
@@ -214,6 +220,12 @@ int decoder_prepare_video(char * header) {
         return FALSE;
     }
 
+    jpg_decoder.tj_transform = tjInitTransform();
+    if (!jpg_decoder.tj_transform) {
+        MSG_ERROR("Error creating transformer!");
+        return FALSE;
+    }
+
     dbgprint("Stream W=%d H=%d\n", jpg_decoder.m_width, jpg_decoder.m_height);
     jpg_decoder.subsamp       = 0;
     jpg_decoder.m_ySize       = jpg_decoder.m_width * jpg_decoder.m_height;
@@ -251,11 +263,20 @@ void decoder_cleanup() {
     FREE_OBJECT(jpg_decoder.m_webcamBuf, free);
     FREE_OBJECT(jpg_decoder.swc, sws_freeContext);
     FREE_OBJECT(jpg_decoder.tj, tjDestroy);
+    FREE_OBJECT(jpg_decoder.tj_transform, tjDestroy);
 }
 
 static void decode_next_frame() {
     BYTE *p = jpg_frames[jpg_decoder.m_NextFrame].data;
     unsigned long len = (unsigned long)jpg_frames[jpg_decoder.m_NextFrame].length;
+
+    tjtransform t = {.op = TJXOP_ROT180 };
+    tjTransform(jpg_decoder.tj_transform, p, len, 1,
+                &jpg_transform_buffer.data, &jpg_transform_buffer.length,
+                &t, 0);
+
+    p = jpg_transform_buffer.data;
+    len = jpg_transform_buffer.length;
 
     if (jpg_decoder.subsamp == 0) {
         int width, height, subsamp, colorspace;
